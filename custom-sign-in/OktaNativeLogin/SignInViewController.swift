@@ -28,34 +28,126 @@ class SignInViewController: UIViewController {
         
         // Setup Okta Auth Client
 //        #warning ("Enter your Okta organization domain here")
-        let url = URL(string: "https://lohika-um.oktapreview.com")!
-        client = AuthenticationClient(oktaDomain: url, delegate: self, mfaHandler: self)
+        
+//        client = AuthenticationClient(oktaDomain: url, delegate: self, mfaHandler: self)
         oktaOidc = try! OktaOidc()
     }
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
-        if let controller = segue.destination as? UserProfileViewController {
-            controller.profile = client.embedded?.user?.profile
-            controller.logoutTappedCallback = performLogout
-        }
+//        if let controller = segue.destination as? UserProfileViewController {
+//            controller.profile = client.embedded?.user?.profile
+//            controller.logoutTappedCallback = performLogout
+//        }
     }
     
     // MARK: - Private
     
-    private var client: AuthenticationClient!
+//    private var client: AuthenticationClient!
     private var oktaOidc: OktaOidc!
     private var authState: OktaOidcStateManager?
     private weak var mfaController: MFAViewController?
     
     private var userProfile: EmbeddedResponse.User.Profile? {
-        guard client.status == .success else { return nil }
-        return client.embedded?.user?.profile
+//        guard client.status == .success else { return nil }
+//        return client.embedded?.user?.profile
+        return nil
     }
     
     private func performLogout() {
-        self.client.resetStatus()
+//        self.client.resetStatus()
         self.authState = nil
         navigationController?.popViewController(animated: true)
+    }
+    
+    func handleStatus(status: OktaAuthStatus) {
+//        self.updateStatus(status: status)
+//        currentStatus = statu
+        
+        switch status.statusType {
+        
+        case .success:
+            let successState: OktaAuthStatusSuccess = status as! OktaAuthStatusSuccess
+            handleSuccess(status: successState)
+            
+        case .passwordWarning:
+            let warningPasswordStatus: OktaAuthStatusPasswordWarning = status as! OktaAuthStatusPasswordWarning
+            warningPasswordStatus.skipPasswordChange(onStatusChange: { status in
+                self.handleStatus(status: status)
+            }) { error in
+                self.handleError(error)
+            }
+            
+        case .passwordExpired:
+            let expiredPasswordStatus: OktaAuthStatusPasswordExpired = status as! OktaAuthStatusPasswordExpired
+            self.handleChangePassword(passwordExpiredStatus: expiredPasswordStatus)
+            
+        case .lockedOut:
+            let lockedOutStatus = status as! OktaAuthStatusLockedOut
+            self.handleLockedOut(lockedOutStatus: lockedOutStatus)
+            
+        case .MFARequired:
+            let mfaRequired: OktaAuthStatusFactorRequired = status as! OktaAuthStatusFactorRequired
+//            self.handleFactorRequired(factorRequiredStatus: mfaRequired)
+            
+        case .MFAChallenge:
+            let mfaChallenge: OktaAuthStatusFactorChallenge = status as! OktaAuthStatusFactorChallenge
+            let factor = mfaChallenge.factor
+            switch factor.type {
+            case .sms:
+                let smsFactor = factor as! OktaFactorSms
+//                self.handleSmsChallenge(factor: smsFactor)
+            case .TOTP:
+                let totpFactor = factor as! OktaFactorTotp
+//                self.handleTotpChallenge(factor: totpFactor)
+            case .question:
+                let questionFactor = factor as! OktaFactorQuestion
+//                self.handleQuestionChallenge(factor: questionFactor)
+            case .push:
+                let pushFactor = factor as! OktaFactorPush
+//                self.handlePushChallenge(factor: pushFactor)
+            default:
+                let alert = UIAlertController(title: "Error", message: "Recieved challenge for unsupported factor", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                present(alert, animated: true, completion: nil)
+                self.cancelTransaction(status: status)
+            }
+        
+        default:
+            let alert = UIAlertController(title: "Error", message: "No handler for \(status.statusType.description)", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+            present(alert, animated: true, completion: nil)
+            self.cancelTransaction(status: status)
+        }
+    }
+    
+    func handleSuccess(status: OktaAuthStatusSuccess) {
+        print("Session token: \(status.sessionToken)")
+        
+        oktaOidc.authenticate(withSessionToken: status.sessionToken, callback: { manager, error in
+            DispatchQueue.main.async {
+                guard let manager = manager else {
+                    self.handleOktaAuthFailure(error: error!)
+                    return
+                }
+                self.handleOktaAuthSuccess(manager: manager, status: status)
+            }
+        })
+    }
+    
+    func handleError(_ error: Error) {
+        print("Error: \(error)")
+        hideProgress()
+        showError(message: error.localizedDescription)
+    }
+    
+    func cancelTransaction(status: OktaAuthStatus) {
+        if status.canCancel() {
+            status.cancel(onSuccess: {
+                self.hideProgress()
+            }, onError: { error in
+                self.handleError(error)
+            })
+        }
     }
     
     // MARK: - IB
@@ -69,47 +161,55 @@ class SignInViewController: UIViewController {
         guard let username = usernameField.text, !username.isEmpty,
             let password = passwordField.text, !password.isEmpty else { return }
         
-        client.authenticate(username: username, password: password)
+        OktaAuthSdk.authenticate(with: URL(string: "https://lohika-um.oktapreview.com")!,
+                                 username: username,
+                                 password: password,
+                                 onStatusChange: { [weak self] status in
+            self?.handleStatus(status: status)
+        }, onError: { [weak self] error in
+            self?.handleError(error)
+        })
+        
         showProgress()
     }
 }
 
-extension SignInViewController: AuthenticationClientDelegate {
-    
-    func handleSuccess(sessionToken: String) {
-        print("Session token: \(sessionToken)")
+extension SignInViewController {
+
+    func handleChangePassword(passwordExpiredStatus: OktaAuthStatusPasswordExpired) -> Void {
+        let alert = UIAlertController(title: "Change Password", message: "Please choose new password", preferredStyle: .alert)
+        alert.addTextField { $0.placeholder = "Old Password" }
+        alert.addTextField { $0.placeholder = "New Password" }
+        alert.addAction(UIAlertAction(title: "OK", style: .default, handler: { _ in
+            guard let old = alert.textFields?[0].text,
+                let new = alert.textFields?[1].text else { return }
+            passwordExpiredStatus.changePassword(oldPassword: old,
+                                                 newPassword: new,
+                                                 onStatusChange: { status in
+                                                    self.handleStatus(status: status)
+            },
+                                                 onError: { error in
+                                                    self.handleError(error)
+            })
+        }))
         
-        oktaOidc.authenticate(withSessionToken: sessionToken, callback: { manager, error in
-            DispatchQueue.main.async {
-                guard let manager = manager else {
-                    self.handleOktaAuthFailure(error: error!)
-                    return
-                }
-                self.handleOktaAuthSuccess(manager: manager)
-            }
-        })
-    }
-    
-    func handleError(_ error: OktaAuthSdk.OktaError) {
-        print("Error: \(error)")
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: { _ in
+            self.cancelTransaction(status: passwordExpiredStatus)
+        }))
         
-        client.resetStatus()
-        hideProgress()
-        showError(message: error.description)
+        present(alert, animated: true, completion: nil)
     }
     
-    func handleChangePassword(canSkip: Bool, callback: @escaping (_ old: String?, _ new: String?, _ skip: Bool) -> Void) {
-        PasswordResetViewController.loadAndPresent(from: self, canSkip: canSkip) { (old, new, isSkipped) in
-            callback(old, new, isSkipped)
-        }
-    }
-    
-    func handleAccountLockedOut(callback: @escaping (String, FactorType) -> Void) {
-        hideProgress()
-        showAccountLockedAlert { username in
-            callback(username, .email)
-            self.showProgress()
-        }
+    func handleLockedOut(lockedOutStatus: OktaAuthStatusLockedOut) {
+        let alert = UIAlertController(title: "Account Locked", message: "To unlock account enter email or username.", preferredStyle: .alert)
+        alert.addTextField { $0.placeholder = "Email or Username"}
+        alert.addAction(UIAlertAction(title: "Send Email", style: .default, handler: { _ in
+            guard let username = alert.textFields?[0].text else { return }
+            
+            callback(username)
+        }))
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentAlert(alert)
     }
     
     func handleRecoveryChallenge(factorType: FactorType?, factorResult: OktaAPISuccessResponse.FactorResult?) {
@@ -120,7 +220,7 @@ extension SignInViewController: AuthenticationClientDelegate {
         }
 
         // Allow to sign in after unlocking user's account
-        client.resetStatus()
+        
 
         showUnlockEmailIsSentAlert()
     }
@@ -131,6 +231,7 @@ extension SignInViewController: AuthenticationClientDelegate {
     }
 }
 
+/*
 extension SignInViewController: AuthenticationClientMFAHandler {
     
     func selectFactor(factors: [EmbeddedResponse.Factor], callback: @escaping (EmbeddedResponse.Factor) -> Void) {
@@ -182,6 +283,7 @@ extension SignInViewController: AuthenticationClientMFAHandler {
         mfaController?.requestSecurityQuestion(callback: callback)
     }
 }
+ */
 
 // UI Utils
 private extension SignInViewController {
@@ -208,17 +310,6 @@ private extension SignInViewController {
         signInButton.isEnabled = true
     }
     
-    func showAccountLockedAlert(and callback: @escaping (_ username: String) -> Void) {
-        let alert = UIAlertController(title: "Account Locked", message: "To unlock account enter email or username.", preferredStyle: .alert)
-        alert.addTextField { $0.placeholder = "Email or Username"}
-        alert.addAction(UIAlertAction(title: "Send Email", style: .default, handler: { _ in
-            guard let username = alert.textFields?[0].text else { return }
-            callback(username)
-        }))
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        presentAlert(alert)
-    }
-    
     func showUnlockEmailIsSentAlert() {
         let alert = UIAlertController(title: "Email sent!", message: "Email has been sent to your email address with instructions on unlocking your account.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
@@ -235,10 +326,13 @@ private extension SignInViewController {
         }
     }
     
-    func handleOktaAuthSuccess(manager: OktaOidcStateManager) {
+    func handleOktaAuthSuccess(manager: OktaOidcStateManager, status: OktaAuthStatusSuccess) {
         authState = manager
         hideProgress()
-        performSegue(withIdentifier: "user-profile", sender: self)
+        
+        let controller = storyboard?.instantiateViewController(withIdentifier: "user-profile") as! UserProfileViewController
+        controller.status = status
+        navigationController?.pushViewController(controller, animated: true)
     }
     
     func handleOktaAuthFailure(error: Error) {
@@ -250,12 +344,12 @@ private extension SignInViewController {
 
 private extension SignInViewController {
     func setupForUITests() -> Bool {
-        guard let testURL = ProcessInfo.processInfo.environment["OKTA_URL"],
-              let testConfig = configForUITests
-              else { return true }
-        client = AuthenticationClient(oktaDomain: URL(string: testURL)!, delegate: self, mfaHandler: self)
-        oktaOidc = try! OktaOidc(configuration: OktaOidcConfig(with: testConfig))
-        return false
+//        guard let testURL = ProcessInfo.processInfo.environment["OKTA_URL"],
+//              let testConfig = configForUITests
+//              else { return true }
+//        client = AuthenticationClient(oktaDomain: URL(string: testURL)!, delegate: self, mfaHandler: self)
+//        oktaOidc = try! OktaOidc(configuration: OktaOidcConfig(with: testConfig))
+        return true
     }
     
     var configForUITests: [String: String]? {

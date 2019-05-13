@@ -19,8 +19,7 @@ import OktaAuthSdk
 
 class UserProfileViewController: UIViewController {
     
-    var profile: EmbeddedResponse.User.Profile?
-    var logoutTappedCallback: (() -> Void)?
+    var status: OktaAuthStatusSuccess?
     
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -30,10 +29,11 @@ class UserProfileViewController: UIViewController {
     // MARK: - Private
     
     private func updateUI() {
-        titleLabel.text = "Welcome, \(profile?.firstName ?? "-")"
-        subtitleLabel.text = profile?.login
-        timezoneLabel.text = profile?.timeZone
-        localeLabel.text = profile?.locale
+        guard let profile = status?.model.embedded?.user?.profile else { return }
+        titleLabel.text = "Welcome, \(profile.firstName ?? "-")"
+        subtitleLabel.text = profile.login
+        timezoneLabel.text = profile.timeZone
+        localeLabel.text = profile.locale
     }
     
     // MARK: - IB
@@ -44,6 +44,6 @@ class UserProfileViewController: UIViewController {
     @IBOutlet weak var localeLabel: UILabel!
     
     @IBAction private func logoutTapped() {
-        logoutTappedCallback?()
+        navigationController?.popViewController(animated: true)
     }
 }

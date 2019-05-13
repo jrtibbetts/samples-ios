@@ -111,7 +111,7 @@ extension MFAViewController : UITableViewDataSource {
             UITableViewCell(style: .default, reuseIdentifier: "MFAFactorCell")
         
         let factor = self.factors[indexPath.row]
-        cell.textLabel?.text = factor.factorType?.description
+//        cell.textLabel?.text = factor.factorType?.description
         
         return cell
     }
@@ -120,7 +120,7 @@ extension MFAViewController : UITableViewDataSource {
 extension MFAViewController : UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         var controller: UIViewController?
-        
+        /*
         let factor = self.factors[indexPath.row]
         switch factor.factorType! {
         case .push:
@@ -160,5 +160,6 @@ extension MFAViewController : UITableViewDelegate {
             self.currentController = controller
             self.navigationController?.pushViewController(controller, animated: true)
         }
+ */
     }
 }

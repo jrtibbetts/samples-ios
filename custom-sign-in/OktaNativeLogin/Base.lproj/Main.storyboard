@@ -109,7 +109,7 @@
         <!--Native Sample-->
         <scene sceneID="BHP-8w-Gbc">
             <objects>
-                <viewController id="3q8-Cy-zMx" customClass="UserProfileViewController" customModule="OktaNativeLogin" customModuleProvider="target" sceneMemberID="viewController">
+                <viewController storyboardIdentifier="user-profile" id="3q8-Cy-zMx" customClass="UserProfileViewController" customModule="OktaNativeLogin" customModuleProvider="target" sceneMemberID="viewController">
                     <view key="view" contentMode="scaleToFill" id="yWd-fq-cBo">
                         <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
